@@ -1,0 +1,503 @@
+---
+title: "Assignment_2_9301_chunlei2_Chunlei"
+author: "Chunlei Liu"
+date: "9/20/2018"
+output: pdf_document
+---
+
+```{r include=FALSE}
+library(MASS)
+library(glmnet)  # glmnet for lasso
+library(ggplot2)  # qplot
+library(gridExtra)  # grid.arrange
+```
+
+
+```{r include=FALSE}
+set.seed(9301)
+#rm(list = ls())
+load('BostonHousing1.Rdata')
+myData = Housing1
+n = nrow(myData)
+p = ncol(myData) - 1
+# some algorithms need the matrix/vector 
+# input (instead of a data frame)
+X = data.matrix(myData[,-1])  
+Y = myData[,1] 
+#number of iterations
+T = 50
+# all.test.id: ntestxT matrix, each column records 
+ntest = round(n * 0.25)  # test set size
+ntrain = n-ntest  # training set size
+all.test.id = matrix(0, ntest, T)  # 
+for(t in 1:T){
+  all.test.id[, t] = sample(1:n, ntest)
+}
+save(all.test.id, file="alltestID.RData")
+#MSPE result
+res_mpse = data.frame(matrix(0, T, 10))
+colnames(res_mpse) = c('Full', 'AIC.F', 'AIC.B', 'BIC.F', 'BIC.B', 'R.min', 'R.1se', 'L.min', 'L.1se', 'L.refit' )
+#model size result
+res_model = data.frame(matrix(0, T, 10))
+colnames(res_model) = c('Full', 'AIC.F', 'AIC.B', 'BIC.F', 'BIC.B', 'R.min', 'R.1se', 'L.min', 'L.1se', 'L.refit' )
+#computation time 
+res_time = data.frame(matrix(0, 1, 10))
+colnames(res_time) = c('Full', 'AIC.F', 'AIC.B', 'BIC.F', 'BIC.B', 'R.min', 'R.1se', 'L.min', 'L.1se', 'L.refit' )
+```
+
+
+
+
+
+
+```{r include=FALSE}
+set.seed(9301)
+# Tune for ridge
+tune_ridge = data.frame(matrix(0, T, 4))
+colnames(tune_ridge) = c('min_lambda', 'max_lambda', 'lambda.min', 'lambda.1se')
+for (i in 1:T) {
+  test.id = all.test.id[,i]
+  cv.out = cv.glmnet(X[-test.id, ], Y[-test.id], alpha = 0)
+  tune_ridge[i, 1] = min(cv.out$lambda)
+  tune_ridge[i, 2] = max(cv.out$lambda)
+  tune_ridge[i, 3] = cv.out$lambda.min
+  tune_ridge[i, 4] = cv.out$lambda.1se
+}
+
+# Tune for lasso
+tune_lasso = data.frame(matrix(0, T, 4))
+colnames(tune_lasso) = c('min_lambda', 'max_lambda', 'lambda.min', 'lambda.1se')
+for (i in 1:T) {
+  test.id = all.test.id[,i]
+  cv.out = cv.glmnet(X[-test.id, ], Y[-test.id], alpha = 1)
+  tune_lasso[i, 1] = min(cv.out$lambda)
+  tune_lasso[i, 2] = max(cv.out$lambda)
+  tune_lasso[i, 3] = cv.out$lambda.min
+  tune_lasso[i, 4] = cv.out$lambda.1se
+}
+#From the two tables, we find lambda.min is close to min_lambda. We can choose smaller min_lambda.
+#max(tune_ridge['lambda.1se'])
+#max(tune_lasso['lambda.1se'])
+```
+
+
+```{r include=FALSE}
+set.seed(9301)
+# Q1
+for (i in 1:T) {
+  test.id = all.test.id[,i]
+  #Full
+  start.time = proc.time()
+  full.model = lm(Y ~ ., data = myData[-test.id,])
+  Ytest.pred = predict(full.model, newdata = myData[test.id,])
+  res_mpse[i, 1] = mean((Y[test.id] - Ytest.pred)^2)
+  res_model[i, 1] = length(full.model$coefficients) - 1
+  res_time[1] = res_time[1] + (proc.time() - start.time)[1]
+  #AIC.F Do the time for fitting the start model counted
+  start.time = proc.time()
+  full.model = lm(Y ~ ., data = myData[-test.id, ])
+  stepAIC = step(lm(Y ~ 1, data = myData[-test.id, ]), 
+                 list(upper = full.model),
+                 trace = 0, direction = "forward")
+  Ytest.pred = predict(stepAIC, newdata = myData[test.id, ])
+  res_mpse[i, 2] = mean((Y[test.id] - Ytest.pred)^2)
+  res_model[i, 2] = length(stepAIC$coefficients) - 1
+  res_time[2] = res_time[2] + (proc.time() - start.time)[1]
+  #AIC.B
+  start.time = proc.time()
+  full.model = lm(Y ~ ., data = myData[-test.id, ])
+  stepAIC = step(full.model, trace = 0, direction = "backward")
+  Ytest.pred = predict(stepAIC, newdata = myData[test.id, ])
+  res_mpse[i, 3] = mean((Y[test.id] - Ytest.pred)^2)
+  res_model[i, 3] = length(stepAIC$coefficients) - 1
+  res_time[3] = res_time[3] + (proc.time() - start.time)[1]
+  #BIC.F
+  start.time = proc.time()
+  full.model = lm(Y ~ ., data = myData[-test.id, ])
+  stepAIC = step(lm(Y ~ 1, data = myData[-test.id, ]),
+               list(upper = full.model),
+               trace = 0, direction = "forward", k = log(ntrain))
+  Ytest.pred = predict(stepAIC, newdata = myData[test.id, ])
+  res_mpse[i, 4] = mean((Y[test.id] - Ytest.pred)^2)
+  res_model[i, 4] = length(stepAIC$coefficients) - 1
+  res_time[4] = res_time[4] + (proc.time() - start.time)[1]
+
+  #BIC.B
+  start.time = proc.time()
+  full.model = lm(Y ~ ., data = myData[-test.id, ])
+  stepAIC = step(full.model, trace = 0,
+               direction = "backward", k = log(ntrain))
+  Ytest.pred = predict(stepAIC, newdata = myData[test.id, ])
+  res_mpse[i, 5] = mean((Y[test.id] - Ytest.pred)^2)
+  res_model[i, 5] = length(stepAIC$coefficients) - 1
+  res_time[5] = res_time[5] + (proc.time() - start.time)[1]
+  
+  #R.min
+  start.time = proc.time()
+  cv.out = cv.glmnet(X[-test.id, ], Y[-test.id], alpha = 0, lambda =  seq(from = 0.3, to = 0, length.out = 100))
+  best.lam = cv.out$lambda.min
+  Ytest.pred = predict(cv.out, s = best.lam, newx = X[test.id, ])
+  res_mpse[i, 6] = mean((Y[test.id] - Ytest.pred)^2)
+  tmpX = scale(X[-test.id, ]) * sqrt(ntrain / (ntrain - 1))
+  d = svd(tmpX)$d 
+  # df for Ridge with lambda_min
+  best.lam = cv.out$lambda.min
+  res_model[i, 6] = sum(d^2/(d^2 + best.lam*ntrain))
+  res_time[6] = res_time[6] + (proc.time() - start.time)[1]
+  
+  #R.1se
+  start.time = proc.time()
+  cv.out = cv.glmnet(X[-test.id, ], Y[-test.id], alpha = 0, lambda = seq(from = 0.3, to = 0, length.out = 100))
+  best.lam = cv.out$lambda.1se
+  Ytest.pred = predict(cv.out, s = best.lam, newx = X[test.id, ])
+  res_mpse[i, 7] = mean((Y[test.id] - Ytest.pred)^2)
+  tmpX = scale(X[-test.id, ]) * sqrt(ntrain / (ntrain - 1))
+  d = svd(tmpX)$d 
+  # df for Ridge with lambda_1se
+  best.lam = cv.out$lambda.1se
+  res_model[i, 7] = sum(d^2/(d^2 + best.lam*ntrain))
+  res_time[7] = res_time[7] + (proc.time() - start.time)[1]
+  
+  #L.min
+  start.time = proc.time()
+  cv.out = cv.glmnet(X[-test.id, ], Y[-test.id], alpha = 1, lambda = seq(from = 0.1, to = 0, length.out = 100))
+  best.lam = cv.out$lambda.min
+  Ytest.pred = predict(cv.out, s = best.lam, newx = X[test.id, ])
+  res_mpse[i, 8] = mean((Ytest.pred - Y[test.id])^2)
+  mylasso.coef = predict(cv.out, s = best.lam, type = "coefficients")
+  res_model[i, 8] = sum(mylasso.coef != 0) - 1  # size of Lasso with lambda.min
+  res_time[8] = res_time[8] + (proc.time() - start.time)[1]
+  
+  #L.1se
+  start.time = proc.time()
+  cv.out = cv.glmnet(X[-test.id, ], Y[-test.id], alpha = 1, lambda = seq(from = 0.1, to = 0, length.out = 100))
+  best.lam = cv.out$lambda.1se
+  Ytest.pred = predict(cv.out, s = best.lam, newx = X[test.id, ])
+  res_mpse[i, 9] = mean((Ytest.pred - Y[test.id])^2)
+  mylasso.coef = predict(cv.out, s = best.lam, type = "coefficients")
+  res_model[i, 9] = sum(mylasso.coef != 0) - 1  # size of Lasso with lambda.min
+  res_time[9] = res_time[9] + (proc.time() - start.time)[1]  
+  
+  #L.refit
+  start.time = proc.time()
+  cv.out = cv.glmnet(X[-test.id, ], Y[-test.id], alpha = 1, lambda = seq(from = 0.1, to = 0, length.out = 100))
+  best.lam = cv.out$lambda.1se
+  mylasso.coef = predict(cv.out, s = best.lam, type = "coefficients")
+  var.sel = row.names(mylasso.coef)[nonzeroCoef(mylasso.coef)[-1]]
+  tmp.X = X[, colnames(X) %in% var.sel]
+  mylasso.refit = coef(lm(Y[-test.id] ~ tmp.X[-test.id, ]))
+  Ytest.pred = mylasso.refit[1] + tmp.X[test.id,] %*% mylasso.refit[-1]
+  res_mpse[i, 10] = mean((Ytest.pred - Y[test.id])^2)
+  res_model[i, 10] = length(var.sel)
+  res_time[10] = res_time[10] + (proc.time() - start.time)[1]
+}
+```
+```{r include=FALSE}
+#summary(res_mpse)
+```
+
+```{r include=FALSE}
+#summary(res_model)
+#res_time
+```
+
+```{r include=FALSE}
+set.seed(9301)
+# Q2
+#rm(list = ls())
+load('BostonHousing2.Rdata')
+myData = Housing2
+n = nrow(myData)
+p = ncol(myData) - 1
+# some algorithms need the matrix/vector 
+# input (instead of a data frame)
+X = data.matrix(myData[,-1])  
+Y = myData[,1] 
+#number of iterations
+T = 50
+# all.test.id: ntestxT matrix, each column records 
+ntest = round(n * 0.25)  # test set size
+ntrain = n-ntest  # training set size
+all.test.id = matrix(0, ntest, T)  # 
+for(t in 1:T){
+  all.test.id[, t] = sample(1:n, ntest)
+}
+#MSPE result
+res_mpse2 = data.frame(matrix(0, T, 5))
+colnames(res_mpse2) = c('R.min', 'R.1se', 'L.min', 'L.1se', 'L.refit' )
+#model size result
+res_model2 = data.frame(matrix(0, T, 5))
+colnames(res_model2) = c('R.min', 'R.1se', 'L.min', 'L.1se', 'L.refit' )
+#computation time 
+res_time2 = data.frame(matrix(0, 1, 5))
+colnames(res_time2) = c('R.min', 'R.1se', 'L.min', 'L.1se', 'L.refit' )
+```
+
+```{r include=FALSE}
+set.seed(9301)
+# Tune for ridge
+tune_ridge2 = data.frame(matrix(0, T, 4))
+colnames(tune_ridge2) = c('min_lambda', 'max_lambda', 'lambda.min', 'lambda.1se')
+for (i in 1:T) {
+  test.id = all.test.id[,i]
+  cv.out = cv.glmnet(X[-test.id, ], Y[-test.id], alpha = 0)
+  tune_ridge2[i, 1] = min(cv.out$lambda)
+  tune_ridge2[i, 2] = max(cv.out$lambda)
+  tune_ridge2[i, 3] = cv.out$lambda.min
+  tune_ridge2[i, 4] = cv.out$lambda.1se
+}
+
+# Tune for lasso
+tune_lasso2 = data.frame(matrix(0, T, 4))
+colnames(tune_lasso2) = c('min_lambda', 'max_lambda', 'lambda.min', 'lambda.1se')
+for (i in 1:T) {
+  test.id = all.test.id[,i]
+  cv.out = cv.glmnet(X[-test.id, ], Y[-test.id], alpha = 1)
+  tune_lasso2[i, 1] = min(cv.out$lambda)
+  tune_lasso2[i, 2] = max(cv.out$lambda)
+  tune_lasso2[i, 3] = cv.out$lambda.min
+  tune_lasso2[i, 4] = cv.out$lambda.1se
+}
+#From the two tables, we find lambda.min is close to min_lambda. We can choose smaller min_lambda.
+#max(tune_ridge2['lambda.1se'])
+#max(tune_lasso2['lambda.1se'])
+```
+
+```{r include=FALSE}
+set.seed(9301)
+# Q2
+for (i in 1:T) {
+  test.id = all.test.id[,i]
+  #R.min
+  start.time = proc.time()
+  cv.out = cv.glmnet(X[-test.id, ], Y[-test.id], alpha = 0, lambda =  seq(from = 0.5, to = 0, length.out = 100))
+  best.lam = cv.out$lambda.min
+  Ytest.pred = predict(cv.out, s = best.lam, newx = X[test.id, ])
+  res_mpse2[i, 1] = mean((Y[test.id] - Ytest.pred)^2)
+  tmpX = scale(X[-test.id, ]) * sqrt(ntrain / (ntrain - 1))
+  d = svd(tmpX)$d 
+  # df for Ridge with lambda_min
+  best.lam = cv.out$lambda.min
+  res_model2[i, 1] = sum(d^2/(d^2 + best.lam*ntrain))
+  res_time2[1] = res_time2[1] + (proc.time() - start.time)[1]
+  
+  #R.1se
+  start.time = proc.time()
+  cv.out = cv.glmnet(X[-test.id, ], Y[-test.id], alpha = 0, lambda = seq(from = 0.5, to = 0, length.out = 100))
+  best.lam = cv.out$lambda.1se
+  Ytest.pred = predict(cv.out, s = best.lam, newx = X[test.id, ])
+  res_mpse2[i, 2] = mean((Y[test.id] - Ytest.pred)^2)
+  tmpX = scale(X[-test.id, ]) * sqrt(ntrain / (ntrain - 1))
+  d = svd(tmpX)$d 
+  # df for Ridge with lambda_1se
+  best.lam = cv.out$lambda.1se
+  res_model2[i, 2] = sum(d^2/(d^2 + best.lam*ntrain))
+  res_time2[2] = res_time2[2] + (proc.time() - start.time)[1]
+  
+  #L.min
+  start.time = proc.time()
+  cv.out = cv.glmnet(X[-test.id, ], Y[-test.id], alpha = 1, lambda = seq(from = 0.005, to = 0, length.out = 100))
+  best.lam = cv.out$lambda.min
+  Ytest.pred = predict(cv.out, s = best.lam, newx = X[test.id, ])
+  res_mpse2[i, 3] = mean((Ytest.pred - Y[test.id])^2)
+  mylasso.coef = predict(cv.out, s = best.lam, type = "coefficients")
+  res_model2[i, 3] = sum(mylasso.coef != 0) - 1  # size of Lasso with lambda.min
+  res_time2[3] = res_time2[3] + (proc.time() - start.time)[1]
+  
+  #L.1se
+  start.time = proc.time()
+  cv.out = cv.glmnet(X[-test.id, ], Y[-test.id], alpha = 1, lambda = seq(from = 0.005, to = 0, length.out = 100))
+  best.lam = cv.out$lambda.1se
+  Ytest.pred = predict(cv.out, s = best.lam, newx = X[test.id, ])
+  res_mpse2[i, 4] = mean((Ytest.pred - Y[test.id])^2)
+  mylasso.coef = predict(cv.out, s = best.lam, type = "coefficients")
+  res_model2[i, 4] = sum(mylasso.coef != 0) - 1  # size of Lasso with lambda.min
+  res_time2[4] = res_time2[4] + (proc.time() - start.time)[1]  
+  
+  #L.refit
+  start.time = proc.time()
+  cv.out = cv.glmnet(X[-test.id, ], Y[-test.id], alpha = 1, lambda = seq(from = 0.005, to = 0, length.out = 100))
+  best.lam = cv.out$lambda.1se
+  mylasso.coef = predict(cv.out, s = best.lam, type = "coefficients")
+  var.sel = row.names(mylasso.coef)[nonzeroCoef(mylasso.coef)[-1]]
+  tmp.X = X[, colnames(X) %in% var.sel]
+  mylasso.refit = coef(lm(Y[-test.id] ~ tmp.X[-test.id, ]))
+  Ytest.pred = mylasso.refit[1] + tmp.X[test.id,] %*% mylasso.refit[-1]
+  res_mpse2[i, 5] = mean((Ytest.pred - Y[test.id])^2)
+  res_model2[i, 5] = length(var.sel)
+  res_time2[5] = res_time2[5] + (proc.time() - start.time)[1]
+}
+```
+
+
+```{r include=FALSE}
+#summary(res_mpse2)
+```
+
+```{r include=FALSE}
+#summary(res_model2)
+#res_time2
+```
+
+```{r include=FALSE}
+set.seed(9301)
+# Q3
+#rm(list = ls())
+load('BostonHousing3.Rdata')
+myData = Housing3
+n = nrow(myData)
+p = ncol(myData) - 1
+# some algorithms need the matrix/vector 
+# input (instead of a data frame)
+X = data.matrix(myData[,-1])  
+Y = myData[,1] 
+#number of iterations
+T = 50
+# all.test.id: ntestxT matrix, each column records 
+ntest = round(n * 0.25)  # test set size
+ntrain = n-ntest  # training set size
+all.test.id = matrix(0, ntest, T)  # 
+for(t in 1:T){
+  all.test.id[, t] = sample(1:n, ntest)
+}
+#MSPE result
+res_mpse3 = data.frame(matrix(0, T, 5))
+colnames(res_mpse3) = c('R.min', 'R.1se', 'L.min', 'L.1se', 'L.refit' )
+#model size result
+res_model3 = data.frame(matrix(0, T, 5))
+colnames(res_model3) = c('R.min', 'R.1se', 'L.min', 'L.1se', 'L.refit' )
+#computation time 
+res_time3 = data.frame(matrix(0, 1, 5))
+colnames(res_time3) = c('R.min', 'R.1se', 'L.min', 'L.1se', 'L.refit' )
+```
+
+```{r include=FALSE}
+set.seed(9301)
+# Tune for ridge
+tune_ridge3 = data.frame(matrix(0, T, 4))
+colnames(tune_ridge3) = c('min_lambda', 'max_lambda', 'lambda.min', 'lambda.1se')
+for (i in 1:T) {
+  test.id = all.test.id[,i]
+  cv.out = cv.glmnet(X[-test.id, ], Y[-test.id], alpha = 0)
+  tune_ridge3[i, 1] = min(cv.out$lambda)
+  tune_ridge3[i, 2] = max(cv.out$lambda)
+  tune_ridge3[i, 3] = cv.out$lambda.min
+  tune_ridge3[i, 4] = cv.out$lambda.1se
+}
+
+# Tune for lasso
+tune_lasso3 = data.frame(matrix(0, T, 4))
+colnames(tune_lasso3) = c('min_lambda', 'max_lambda', 'lambda.min', 'lambda.1se')
+for (i in 1:T) {
+  test.id = all.test.id[,i]
+  cv.out = cv.glmnet(X[-test.id, ], Y[-test.id], alpha = 1)
+  tune_lasso3[i, 1] = min(cv.out$lambda)
+  tune_lasso3[i, 2] = max(cv.out$lambda)
+  tune_lasso3[i, 3] = cv.out$lambda.min
+  tune_lasso3[i, 4] = cv.out$lambda.1se
+}
+#From the two tables, we find lambda.min is close to min_lambda. We can choose smaller min_lambda.
+#max(tune_ridge3['lambda.1se'])
+#min(tune_ridge3['min_lambda'])
+#max(tune_lasso3['lambda.1se'])
+```
+
+```{r include=FALSE}
+set.seed(9301)
+# Q3
+for (i in 1:T) {
+  test.id = all.test.id[,i]
+  #R.min
+  start.time = proc.time()
+  cv.out = cv.glmnet(X[-test.id, ], Y[-test.id], alpha = 0, lambda =  seq(from = 7, to = 3.4, length.out = 100))
+  best.lam = cv.out$lambda.min
+  Ytest.pred = predict(cv.out, s = best.lam, newx = X[test.id, ])
+  res_mpse3[i, 1] = mean((Y[test.id] - Ytest.pred)^2)
+  tmpX = scale(X[-test.id, ]) * sqrt(ntrain / (ntrain - 1))
+  d = svd(tmpX)$d 
+  # df for Ridge with lambda_min
+  best.lam = cv.out$lambda.min
+  res_model3[i, 1] = sum(d^2/(d^2 + best.lam*ntrain))
+  res_time3[1] = res_time3[1] + (proc.time() - start.time)[1]
+  
+  #R.1se
+  start.time = proc.time()
+  cv.out = cv.glmnet(X[-test.id, ], Y[-test.id], alpha = 0, lambda = seq(from = 7, to = 3.4, length.out = 100))
+  best.lam = cv.out$lambda.1se
+  Ytest.pred = predict(cv.out, s = best.lam, newx = X[test.id, ])
+  res_mpse3[i, 2] = mean((Y[test.id] - Ytest.pred)^2)
+  tmpX = scale(X[-test.id, ]) * sqrt(ntrain / (ntrain - 1))
+  d = svd(tmpX)$d 
+  # df for Ridge with lambda_1se
+  best.lam = cv.out$lambda.1se
+  res_model3[i, 2] = sum(d^2/(d^2 + best.lam*ntrain))
+  res_time3[2] = res_time3[2] + (proc.time() - start.time)[1]
+  
+  #L.min
+  start.time = proc.time()
+  cv.out = cv.glmnet(X[-test.id, ], Y[-test.id], alpha = 1, lambda = seq(from = 0.06, to = 0, length.out = 100))
+  best.lam = cv.out$lambda.min
+  Ytest.pred = predict(cv.out, s = best.lam, newx = X[test.id, ])
+  res_mpse3[i, 3] = mean((Ytest.pred - Y[test.id])^2)
+  mylasso.coef = predict(cv.out, s = best.lam, type = "coefficients")
+  res_model3[i, 3] = sum(mylasso.coef != 0) - 1  # size of Lasso with lambda.min
+  res_time3[3] = res_time3[3] + (proc.time() - start.time)[1]
+  
+  #L.1se
+  start.time = proc.time()
+  cv.out = cv.glmnet(X[-test.id, ], Y[-test.id], alpha = 1, lambda = seq(from = 0.06, to = 0, length.out = 100))
+  best.lam = cv.out$lambda.1se
+  Ytest.pred = predict(cv.out, s = best.lam, newx = X[test.id, ])
+  res_mpse3[i, 4] = mean((Ytest.pred - Y[test.id])^2)
+  mylasso.coef = predict(cv.out, s = best.lam, type = "coefficients")
+  res_model3[i, 4] = sum(mylasso.coef != 0) - 1  # size of Lasso with lambda.min
+  res_time3[4] = res_time3[4] + (proc.time() - start.time)[1]  
+  
+  #L.refit
+  start.time = proc.time()
+  cv.out = cv.glmnet(X[-test.id, ], Y[-test.id], alpha = 1, lambda = seq(from = 0.06, to = 0, length.out = 100))
+  best.lam = cv.out$lambda.1se
+  mylasso.coef = predict(cv.out, s = best.lam, type = "coefficients")
+  var.sel = row.names(mylasso.coef)[nonzeroCoef(mylasso.coef)[-1]]
+  tmp.X = X[, colnames(X) %in% var.sel]
+  mylasso.refit = coef(lm(Y[-test.id] ~ tmp.X[-test.id, ]))
+  Ytest.pred = mylasso.refit[1] + tmp.X[test.id,] %*% mylasso.refit[-1]
+  res_mpse3[i, 5] = mean((Ytest.pred - Y[test.id])^2)
+  res_model3[i, 5] = length(var.sel)
+  res_time3[5] = res_time3[5] + (proc.time() - start.time)[1]
+}
+```
+
+```{r echo=FALSE}
+p1_err = ggplot(stack(res_mpse), aes(x = ind, y = values, colour = ind)) +
+  geom_boxplot() + labs(x = 'method', y = 'Prediction Error', colour = 'method') + theme(legend.position="none") + ggtitle('BostonHousing1')
+p1_size = ggplot(stack(res_model), aes(x = ind, y = values, colour = ind)) +
+  geom_boxplot() + labs(x = 'method', y = 'Model Size', colour = 'method') + theme(legend.position="none") + ggtitle('BostonHousing1')
+
+grid.arrange(p1_err, p1_size, ncol = 1, layout_matrix = cbind(c(1,2)))
+```
+
+```{r echo=FALSE}
+p2_err = ggplot(stack(res_mpse2), aes(x = ind, y = values, colour = ind)) +
+  geom_boxplot() + labs(x = 'method', y = 'Prediction Error', colour = 'method') + theme(legend.position="none") + ggtitle('BostonHousing2')
+p2_size = ggplot(stack(res_model2), aes(x = ind, y = values, colour = ind)) +
+  geom_boxplot() + labs(x = 'method', y = 'Model Size', colour = 'method') + theme(legend.position="none") + ggtitle('BostonHousing2')
+p3_err = ggplot(stack(res_mpse3), aes(x = ind, y = values, colour = ind)) + 
+  geom_boxplot() + labs(x = 'method', y = 'Prediction Error', colour = 'method') + theme(legend.position="none") + ggtitle('BostonHousing3')
+p3_size = ggplot(stack(res_model2), aes(x = ind, y = values, colour = ind)) +
+  geom_boxplot() + labs(x = 'method', y = 'Model Size', colour = 'method') + theme(legend.position="none") + ggtitle('BostonHousing3')
+
+grid.arrange(p2_err, p2_size, p3_err, p3_size, ncol = 1, layout_matrix = cbind(c(1,2,3,4)))
+
+```
+```{r echo=FALSE}
+p1_time = ggplot(stack(res_time), aes(x = ind, y = values, colour = ind)) +
+  geom_point() + labs(x = 'method', y = 'Time', colour = 'method') + theme(legend.position="none") + ggtitle('BostonHousing1')
+p2_time = ggplot(stack(res_time2), aes(x = ind, y = values, colour = ind)) +
+  geom_point() + labs(x = 'method', y = 'Time', colour = 'method') + theme(legend.position="none") + ggtitle('BostonHousing2')
+p3_time = ggplot(stack(res_time3), aes(x = ind, y = values, colour = ind)) +
+  geom_point() + labs(x = 'method', y = 'Time', colour = 'method') + theme(legend.position="none") + ggtitle('BostonHousing3')
+grid.arrange(p1_time, p2_time, p3_time, ncol = 1, layout_matrix = cbind(c(1,2,3)))
+```
+
+

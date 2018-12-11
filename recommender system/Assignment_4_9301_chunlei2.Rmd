@@ -1,0 +1,115 @@
+---
+title: "Assignment_4_9301_chunlei2"
+author: "Chunlei Liu"
+date: "12/4/2018"
+output: pdf_document
+---
+
+```{r include=FALSE}
+#load libraries
+rm(list = ls())
+set.seed(9701)
+library(dplyr)
+library(ggplot2)
+library(recommenderlab)  
+library(reshape2)  
+```
+
+```{r include=FALSE}
+# ratings data
+# use colClasses = 'NULL' to skip columns
+ratings = read.csv('ratings.dat', sep = ':', 
+    colClasses = c('integer', 'NULL'), header = FALSE)
+colnames(ratings) = c('UserID', 'MovieID', 'Rating', 'Timestamp')
+ratings$Timestamp = NULL;
+colnames(ratings) = c('user', 'movie', 'rating')
+train.id = sample(nrow(ratings), floor(nrow(ratings)) * 0.6)
+train = ratings[train.id, ]
+
+test = ratings[-train.id, ]
+test.id = sample(nrow(test), floor(nrow(test)) * 0.5)
+test = test[test.id, ]
+
+label = test[c('user', 'rating')]
+test$rating = NULL
+```
+
+
+
+* UBCF:
+
+The first method is user-based collaborative filtering. The assumption is that users with similar preferences will rate items similarly. Thus missing ratings for a user can be predicted by first finding a neighborhood of similar users and then aggregate the ratings of these users to form a prediction.
+
+* Hyperparametrs:
+
+The number of the nearest neighbours is 5. The similarity measure is cosine similarity. The normalization method is Z-score.
+
+* Test error: 1.077071
+
+
+```{r include=FALSE}
+#Method 1, UBCF
+R = acast(train, user ~ movie)
+R = as(R, 'realRatingMatrix')
+rec = Recommender(R, method = 'UBCF',
+                  parameter = list(normalize = 'Z-score', method = 'Cosine', nn = 5)
+)
+recom = predict(rec, R, type = 'ratings') 
+rec_list = as(recom, 'list')
+test$rating = NA
+
+for (u in 1:nrow(test)){
+
+  # Read userid and movieid from columns 2 and 3 of test data
+  userid = as.character(test$user[u])
+  movieid = as.character(test$movie[u])
+  
+  rating = rec_list[[userid]][movieid]
+  # 2.5 may be too arbitrary
+  test$rating[u] = ifelse(is.na(rating), 2.5, rating)
+}
+rmse = mean((test$rating - label$rating)^2)
+rmse
+```
+
+* Popularity:
+
+The second method is popularity based recommender system. It basically uses the items which are in trend right now. For example, if any product which is usually bought by every new user then there are chances that it may suggest that item to the user who just signed up.
+
+* Hyperparameters:
+
+The normalization method is Z-score
+
+* Test error: 0.8673831
+
+
+
+```{r include=FALSE}
+#Method 2, Popularity
+R = acast(train, user ~ movie)
+R = as(R, 'realRatingMatrix')
+rec = Recommender(R, method = 'POPULAR', parameter = list(normalize = 'Z-score'))
+
+recom = predict(rec, R, type = 'ratings') 
+rec_list = as(recom, 'list')
+test$rating = NA
+for (u in 1:nrow(test)){
+  
+  # Read userid and movieid from columns 2 and 3 of test data
+  userid = as.character(test$user[u])
+  movieid = as.character(test$movie[u])
+  
+  rating = rec_list[[userid]][movieid]
+  # 2.5 may be too arbitrary
+  test$rating[u] = ifelse(is.na(rating), 2.5, rating)
+  
+}
+
+#Method 1 error
+rmse = mean((test$rating - label$rating)^2)
+rmse
+```
+
+
+
+

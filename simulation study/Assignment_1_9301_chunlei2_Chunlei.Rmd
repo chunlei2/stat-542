@@ -1,0 +1,100 @@
+---
+title: "Assignment_1_9301_chunlei2_Chunlei"
+author: "Chunlei Liu"
+date: "8/28/2018"
+output: html_document
+---
+
+
+```{r}
+this.dir <- dirname(sys.frame(1)$ofile)
+```
+
+
+```{r}
+set.seed(5335)
+#number of predictors
+p = 2 
+#sd for generating centers
+s = 1 
+#number of observations in each class
+n = 100
+#number of centers
+csize = 10
+#generate twenty different 2-dim vectors from standard normal distribution
+m1 = matrix(rnorm(csize*p), csize, p)*s + cbind(rep(1, csize), rep(0, csize))
+m0 = matrix(rnorm(csize*p), csize, p)*s + cbind(rep(0, csize), rep(1, csize))
+#choose 100 index of centers from each 10 different centers
+id1 = sample(1:csize, n, replace = TRUE)
+id0 = sample(1:csize, n, replace = TRUE)
+#sd for generating x
+s2 = sqrt(1/5)
+#generate x from standard normal distribution
+x_train = matrix(rnorm(2*n*p), 2*n, p)*s2 + rbind(m1[id1,], m0[id0,])
+#generate y 
+y_train = c(rep(1,n), rep(0,n))
+#generate test data
+N = 5000
+id1 = sample(1:csize, N, replace = TRUE)
+id0 = sample(1:csize, N, replace = TRUE)
+x_test = matrix(rnorm(2*N*p), 2*N, p)*s2 + rbind(m1[id1,], m0[id0,])
+y_test = c(rep(1,N), rep(0,N))
+
+#Linear regression
+traindata = data.frame(x_train, y_train)
+testdata = data.frame(x_test, y_test)
+l_model = lm(y_train~ ., data = traindata)
+Ytrain_pred_LS = as.numeric(l_model$fitted.values > 0.5)
+Ytest_pred_LS = as.numeric((predict(l_model, testdata)) > 0.5)
+##calculate train and test error
+train_err_LS = sum(y_train != Ytrain_pred_LS)/(2*n)
+test_err_LS = sum(y_test != Ytest_pred_LS)/(2*N)
+
+#KNN
+library(class)
+myk = c(151, 101, 69, 45, 31, 21, 11, 7, 5, 3, 1)
+m = length(myk)
+train.err.knn = rep(0,m)
+test.err.knn = rep(0, m)
+y_train = factor(y_train)
+y_test = factor(y_test)
+for( j in 1:m){
+  Ytrain.pred = knn(x_train, x_train, y_train, k = myk[j])
+  train.err.knn[j] = sum(y_train != Ytrain.pred)/(2*n)
+  Ytest.pred = knn(x_train, x_test, y_train,k = myk[j])
+  test.err.knn[j] = sum(y_test != Ytest.pred)/(2*N)
+}
+#Bayes error
+mixnorm=function(x){
+  ## return the density ratio for a point x, where each 
+  ## density is a mixture of normal with 10 components
+  sum(exp(-apply((t(m1)-x)^2, 2, sum)*5/2))/sum(exp(-apply((t(m0)-x)^2, 2, sum)*5/2))
+}
+
+Ytest_pred_Bayes = apply(x_test, 1, mixnorm)
+Ytest_pred_Bayes = as.numeric(Ytest_pred_Bayes > 1);
+test.err.Bayes = sum(y_test !=  Ytest_pred_Bayes) / (2*N)
+
+pdf("Assignment_1_9301_chunlei2_Chunlei.pdf")
+plot(c(0.5,m), range(test_err_LS, train_err_LS, test.err.knn, train.err.knn),
+     type="n", xlab="Degree of Freedom", ylab="Error", xaxt="n")
+df = round((2*n)/myk)
+axis(1, at = 1:m, labels = df)
+axis(3, at = 1:m, labels = myk)
+points(1:m, test.err.knn, col="red", pch=1)
+lines(1:m, test.err.knn, col="red", lty=1);
+points(1:m, train.err.knn, col="blue", pch=1);
+lines(1:m, train.err.knn, col="blue", lty=2);
+points(3, train_err_LS, pch=2, cex=2, col="blue")
+points(3, test_err_LS, pch=2, cex=2, col="red")
+abline(test.err.Bayes, 0, col="purple")
+legend("bottomleft", legend = c("Test_KNN", "Train_KNN", "Bayes", "Test_LS", "Train_LS"), lty = c(1,2,1,NA,NA), pch = c(NA,NA,NA,2,2), col = c("red", "blue", "purple", "red", "blue"))
+dev.off()
+```
+
+
+
+
+
+
+

@@ -1,0 +1,61 @@
+---
+title: "Bonus"
+author: "Chunlei Liu"
+date: "11/30/2018"
+output: html_document
+---
+
+```{r include=FALSE}
+library(dplyr)
+library(tidytext)
+library(stringr)
+library(ggplot2)
+library(tidyr)
+library(scales)
+library(textstem)
+library(wordcloud)
+library(reshape2)
+```
+
+* Scatter plot
+
+The x axis is the proportion of each word which belongs to the negative sentiment. The y axis is the proportion is the proportion of each word which belongs to the positive sentiment. The dashed line is the word has same proportion between the positive sentiment and negative sentiment. 
+
+We can see words like "excellent, amaze, favorite ..." lie above the line and "awful, badly, bad ..." lie below the line.
+
+```{r echo=FALSE, warning=FALSE, message=FALSE}
+all = read.table('all.txt', stringsAsFactors = F,header = T)
+tidy_all = all %>% unnest_tokens(word, review) %>%
+  anti_join(stop_words)
+
+frequency = tidy_all %>% mutate(word = str_extract(word, "[a-z']+")) %>%
+  count(sentiment, word)  %>%
+  group_by(sentiment) %>%
+  mutate(proportion = n / sum(n)) %>% 
+  select(-n)  %>%
+  spread(sentiment, proportion)
+
+ggplot(frequency, aes(x = `0`, y = `1`, color = abs(`1` - `0`))) +
+  geom_abline(color = "gray40", lty = 2) +
+  # geom_jitter(alpha = 0.1, size = 1, width = 0.1, height = 0.1) +
+  geom_text(aes(label = word), check_overlap = TRUE, vjust = 1.5) +
+  scale_x_log10(labels = percent_format()) +
+  scale_y_log10(labels = percent_format()) +
+  scale_color_gradient(limits = c(0, 0.001), low = "darkslategray4", high = "gray75") +
+  theme(legend.position="none") +
+  labs(y = "Positive", x = 'Negative')
+
+```
+
+* Wordcloud
+
+0 and black front represent negative sentiments. 1 and grey front represent positive sentiments. Size of the front represent the frequency. There is a great different between positive sentiments and negative sentiments. 
+
+```{r echo=FALSE}
+tidy_all %>%
+  count(word, sentiment, sort = TRUE) %>%
+  acast(word ~ sentiment, value.var = "n", fill = 0) %>%
+  comparison.cloud(colors = c("gray20", "gray80"), scale = c(4, 0.2),
+                   max.words = 100)
+```
+
